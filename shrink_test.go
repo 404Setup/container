@@ -1,9 +1,10 @@
 package container_test
 
 import (
-	"container/v2"
 	"reflect"
 	"testing"
+
+	"github.com/404Setup/container"
 )
 
 func TestShrinkMap(t *testing.T) {

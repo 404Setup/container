@@ -1,9 +1,10 @@
 package container_test
 
 import (
-	"container/v2"
 	"strconv"
 	"testing"
+
+	"github.com/404Setup/container"
 )
 
 var containerBenchmarkSink int

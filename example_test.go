@@ -2,8 +2,9 @@ package container_test
 
 import (
 	"cmp"
-	"container/v2"
 	"fmt"
+
+	"github.com/404Setup/container"
 )
 
 func ExampleMap() {

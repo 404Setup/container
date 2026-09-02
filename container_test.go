@@ -2,11 +2,12 @@ package container_test
 
 import (
 	"cmp"
-	"container/v2"
 	"math/rand/v2"
 	"reflect"
 	"slices"
 	"testing"
+
+	"github.com/404Setup/container"
 )
 
 func TestVector(t *testing.T) {
