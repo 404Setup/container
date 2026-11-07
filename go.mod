@@ -1,3 +1,3 @@
 module github.com/404Setup/container
 
-go 1.28
+go 1.27
