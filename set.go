@@ -11,14 +11,18 @@ type Set[E any] struct {
 	values Map[E, struct{}]
 }
 
-// NewSet returns an empty Set ordered by compare.
-func NewSet[E any](compare Compare[E]) *Set[E] {
-	return &Set[E]{values: *NewMap[E, struct{}](compare)}
+// NewSet returns a Set ordered by compare, initialized with values.
+// Duplicate values are stored once.
+func NewSet[E any](compare Compare[E], values ...E) *Set[E] {
+	s := &Set[E]{values: *NewMap[E, struct{}](compare)}
+	s.AddAll(values...)
+	return s
 }
 
-// NewOrderedSet returns an empty Set ordered by cmp.Compare.
-func NewOrderedSet[E cmp.Ordered]() *Set[E] {
-	return NewSet[E](cmp.Compare[E])
+// NewOrderedSet returns a Set ordered by cmp.Compare, initialized with values.
+// Duplicate values are stored once.
+func NewOrderedSet[E cmp.Ordered](values ...E) *Set[E] {
+	return NewSet[E](cmp.Compare[E], values...)
 }
 
 // Len returns the number of values in s.
@@ -37,6 +41,28 @@ func (s *Set[E]) Contains(value E) bool {
 func (s *Set[E]) Add(value E) bool {
 	_, loaded := s.values.LoadOrStore(value, struct{}{})
 	return !loaded
+}
+
+// AddAll inserts every value in values and returns the number of values that
+// were newly added. Duplicates, within values or already in s, count once.
+func (s *Set[E]) AddAll(values ...E) (added int) {
+	before := s.values.Len()
+	switch len(values) {
+	case 0:
+		s.values.checkCompare()
+		return 0
+	case 1:
+		if s.Add(values[0]) {
+			return 1
+		}
+		return 0
+	}
+	batch := make([]mapEntry[E, struct{}], len(values))
+	for i, v := range values {
+		batch[i].key = v
+	}
+	s.values.storeBatch(batch)
+	return s.values.Len() - before
 }
 
 // Delete removes value. It reports whether value was present.

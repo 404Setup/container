@@ -26,6 +26,9 @@ func (q *Queue[E]) Cap() int { return q.deque.Cap() }
 // Enqueue adds value to the back of q.
 func (q *Queue[E]) Enqueue(value E) { q.deque.PushBack(value) }
 
+// EnqueueAll adds values to the back of q in order.
+func (q *Queue[E]) EnqueueAll(values ...E) { q.deque.PushBackAll(values...) }
+
 // Dequeue removes and returns the front element. The ok result is false if q is
 // empty.
 func (q *Queue[E]) Dequeue() (value E, ok bool) { return q.deque.PopFront() }
@@ -69,6 +72,9 @@ func (s *Stack[E]) Cap() int { return s.vector.Cap() }
 
 // Push adds value to the top of s.
 func (s *Stack[E]) Push(value E) { s.vector.Append(value) }
+
+// PushAll adds values to the top of s in order, so the last value is on top.
+func (s *Stack[E]) PushAll(values ...E) { s.vector.Append(values...) }
 
 // Pop removes and returns the top element. The ok result is false if s is
 // empty.

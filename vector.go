@@ -41,6 +41,11 @@ func (v *Vector[E]) Append(values ...E) {
 	v.values = append(v.values, values...)
 }
 
+// AppendSeq adds the values produced by seq to the end of v.
+func (v *Vector[E]) AppendSeq(seq iter.Seq[E]) {
+	v.values = slices.AppendSeq(v.values, seq)
+}
+
 // Insert adds values before index i. It panics if i is outside [0, v.Len()].
 func (v *Vector[E]) Insert(i int, values ...E) {
 	if i < 0 || i > len(v.values) {

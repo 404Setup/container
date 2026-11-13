@@ -86,6 +86,39 @@ func (d *Deque[E]) PushBack(value E) {
 	d.len++
 }
 
+// PushBackAll adds values to the back of d in order, growing the ring buffer at
+// most once.
+func (d *Deque[E]) PushBackAll(values ...E) {
+	if len(values) == 0 {
+		return
+	}
+	d.ensure(len(values))
+	d.writeAt(d.physical(d.len), values)
+	d.len += len(values)
+}
+
+// PushFrontAll adds values to the front of d, so that they appear in d in the
+// same order as in values. It grows the ring buffer at most once.
+func (d *Deque[E]) PushFrontAll(values ...E) {
+	if len(values) == 0 {
+		return
+	}
+	d.ensure(len(values))
+	d.head -= len(values)
+	if d.head < 0 {
+		d.head += len(d.buf)
+	}
+	d.writeAt(d.head, values)
+	d.len += len(values)
+}
+
+// writeAt copies values into the ring buffer starting at physical index i,
+// wrapping around the end of the buffer if needed.
+func (d *Deque[E]) writeAt(i int, values []E) {
+	n := copy(d.buf[i:], values)
+	copy(d.buf, values[n:])
+}
+
 // PopFront removes and returns the first element. The ok result is false if d
 // is empty.
 func (d *Deque[E]) PopFront() (value E, ok bool) {

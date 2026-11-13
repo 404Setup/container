@@ -39,6 +39,23 @@ func (q *PriorityQueue[E]) Push(value E) {
 	q.up(len(q.values) - 1)
 }
 
+// PushAll adds values to q. When the batch is large relative to q it rebuilds
+// the heap in linear time instead of sifting each value individually.
+func (q *PriorityQueue[E]) PushAll(values ...E) {
+	q.checkCompare()
+	old := len(q.values)
+	q.values = append(q.values, values...)
+	if len(values) > old {
+		for i := len(q.values)/2 - 1; i >= 0; i-- {
+			q.down(i)
+		}
+		return
+	}
+	for i := old; i < len(q.values); i++ {
+		q.up(i)
+	}
+}
+
 // Peek returns the highest-priority element without removing it. The ok result
 // is false if q is empty.
 func (q *PriorityQueue[E]) Peek() (value E, ok bool) {

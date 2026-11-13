@@ -3,6 +3,7 @@ package container
 import (
 	"cmp"
 	"iter"
+	"math/bits"
 	"slices"
 	"sort"
 )
@@ -26,18 +27,29 @@ type mapEntry[K, V any] struct {
 	value V
 }
 
-// NewMap returns an empty Map ordered by compare. Compare must define a strict
-// total order and must not be nil.
-func NewMap[K, V any](compare Compare[K]) *Map[K, V] {
+// Entry is a key-value pair used to initialize a Map or to store entries in
+// bulk.
+type Entry[K, V any] struct {
+	Key   K
+	Value V
+}
+
+// NewMap returns a Map ordered by compare, initialized with entries. If
+// entries contains duplicate keys, the last one wins. Compare must define a
+// strict total order and must not be nil.
+func NewMap[K, V any](compare Compare[K], entries ...Entry[K, V]) *Map[K, V] {
 	if compare == nil {
 		panic("container: nil Map comparison")
 	}
-	return &Map[K, V]{compare: compare}
+	m := &Map[K, V]{compare: compare}
+	m.StoreAll(entries...)
+	return m
 }
 
-// NewOrderedMap returns an empty Map ordered by cmp.Compare.
-func NewOrderedMap[K cmp.Ordered, V any]() *Map[K, V] {
-	return NewMap[K, V](cmp.Compare[K])
+// NewOrderedMap returns a Map ordered by cmp.Compare, initialized with
+// entries. If entries contains duplicate keys, the last one wins.
+func NewOrderedMap[K cmp.Ordered, V any](entries ...Entry[K, V]) *Map[K, V] {
+	return NewMap[K, V](cmp.Compare[K], entries...)
 }
 
 // Len returns the number of entries in m.
@@ -77,6 +89,151 @@ func (m *Map[K, V]) Swap(key K, value V) (previous V, loaded bool) {
 	copy(m.entries[i+1:], m.entries[i:])
 	m.entries[i] = mapEntry[K, V]{key: key, value: value}
 	return previous, false
+}
+
+// StoreAll sets the value for every entry in entries, as if by calling Store
+// for each one in order: if a key appears more than once, the last value wins.
+// It sorts the batch (skipping the sort if it is already in order) and merges
+// it into m, so it avoids the O(k*n) cost of repeated Store calls.
+func (m *Map[K, V]) StoreAll(entries ...Entry[K, V]) {
+	m.checkCompare()
+	switch len(entries) {
+	case 0:
+		return
+	case 1:
+		m.Store(entries[0].Key, entries[0].Value)
+		return
+	}
+	batch := make([]mapEntry[K, V], len(entries))
+	for i, e := range entries {
+		batch[i] = mapEntry[K, V]{key: e.Key, value: e.Value}
+	}
+	m.storeBatch(batch)
+}
+
+// storeBatch stores batch's entries in m with Store semantics. It takes
+// ownership of batch and may reorder and retain it.
+func (m *Map[K, V]) storeBatch(batch []mapEntry[K, V]) {
+	batch = m.normalize(batch)
+	n, k := len(m.entries), len(batch)
+	if k == 0 {
+		return
+	}
+	// Fast paths: empty map, or every new key sorts after the existing ones.
+	if n == 0 {
+		m.entries = batch
+		return
+	}
+	if m.compare(m.entries[n-1].key, batch[0].key) < 0 {
+		m.entries = append(m.entries, batch...)
+		return
+	}
+
+	// For small batches, binary-search each key and shift the existing entries
+	// in place, avoiding a full-size allocation and per-entry comparisons.
+	if k*bits.Len(uint(n)) < n {
+		m.insertSorted(batch)
+		return
+	}
+
+	merged := make([]mapEntry[K, V], 0, n+k)
+	i, j := 0, 0
+	for i < n && j < k {
+		switch c := m.compare(m.entries[i].key, batch[j].key); {
+		case c < 0:
+			merged = append(merged, m.entries[i])
+			i++
+		case c > 0:
+			merged = append(merged, batch[j])
+			j++
+		default:
+			merged = append(merged, batch[j])
+			i++
+			j++
+		}
+	}
+	merged = append(merged, m.entries[i:]...)
+	merged = append(merged, batch[j:]...)
+	clear(m.entries)
+	m.entries = merged
+}
+
+// normalize sorts batch by key and removes duplicate keys, keeping the last
+// entry of each run of equal keys.
+func (m *Map[K, V]) normalize(batch []mapEntry[K, V]) []mapEntry[K, V] {
+	strict := true
+	for i := 1; i < len(batch); i++ {
+		if m.compare(batch[i-1].key, batch[i].key) >= 0 {
+			strict = false
+			break
+		}
+	}
+	if strict {
+		return batch
+	}
+	// Sort with the original position as a tiebreaker: pdqsort is much faster
+	// than a stable sort, and equal keys still end up in insertion order.
+	type indexed struct {
+		mapEntry[K, V]
+		pos int
+	}
+	tmp := make([]indexed, len(batch))
+	for i, e := range batch {
+		tmp[i] = indexed{e, i}
+	}
+	slices.SortFunc(tmp, func(a, b indexed) int {
+		if c := m.compare(a.key, b.key); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.pos, b.pos)
+	})
+	for i := range tmp {
+		batch[i] = tmp[i].mapEntry
+	}
+	out := batch[:0]
+	for i, e := range batch {
+		if i+1 < len(batch) && m.compare(e.key, batch[i+1].key) == 0 {
+			continue
+		}
+		out = append(out, e)
+	}
+	clear(batch[len(out):])
+	return out
+}
+
+// insertSorted stores a sorted, duplicate-free, non-empty batch by locating
+// each key with binary search, then shifting existing entries once, from the
+// back, into their final positions.
+func (m *Map[K, V]) insertSorted(batch []mapEntry[K, V]) {
+	n := len(m.entries)
+	type insertion struct {
+		at    int
+		entry mapEntry[K, V]
+	}
+	pending := make([]insertion, 0, len(batch))
+	lo := 0
+	for _, e := range batch {
+		i := lo + sort.Search(n-lo, func(i int) bool {
+			return m.compare(m.entries[lo+i].key, e.key) >= 0
+		})
+		if i < n && m.compare(m.entries[i].key, e.key) == 0 {
+			m.entries[i].value = e.value
+		} else {
+			pending = append(pending, insertion{at: i, entry: e})
+		}
+		lo = i
+	}
+	if len(pending) == 0 {
+		return
+	}
+	m.entries = slices.Grow(m.entries, len(pending))[:n+len(pending)]
+	end := n
+	for j := len(pending) - 1; j >= 0; j-- {
+		p := pending[j]
+		copy(m.entries[p.at+j+1:end+j+1], m.entries[p.at:end])
+		m.entries[p.at+j] = p.entry
+		end = p.at
+	}
 }
 
 // LoadOrStore returns the existing value for key if present. Otherwise, it
